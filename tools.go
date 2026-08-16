@@ -391,15 +391,23 @@ func versionDiff(c *client, args json.RawMessage) (map[string]any, error) {
 		}
 		return m
 	}
+	artifactKey := func(build wireBuild) string {
+		ids := make([]string, 0, len(build.Artifacts))
+		for _, artifact := range build.Artifacts {
+			ids = append(ids, artifact.Region+"="+artifact.ExternalIdentifier)
+		}
+		sort.Strings(ids)
+		return strings.Join(ids, ",")
+	}
 	am, bm := index(a), index(b)
-	var added, removed, changed []string
+	added, removed, changed := []string{}, []string{}, []string{}
 	for k, bb := range bm {
 		ab, ok := am[k]
 		if !ok {
 			added = append(added, k)
 			continue
 		}
-		if len(ab.Artifacts) != len(bb.Artifacts) || ab.Status != bb.Status {
+		if ab.Status != bb.Status || artifactKey(ab) != artifactKey(bb) {
 			changed = append(changed, k)
 		}
 	}
@@ -477,20 +485,29 @@ func consumeSnippet(c *client, args json.RawMessage) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	fingerprint := in.Fingerprint
+	if fingerprint == "" {
+		var out struct {
+			Channel struct {
+				Version *wireVersion `json:"version"`
+			} `json:"channel"`
+		}
+		if err := c.call("GET", compatBase(in.OrganizationID, in.ProjectID)+"/buckets/"+url.PathEscape(in.Bucket)+"/channels/"+url.PathEscape(channel), nil, &out); err != nil {
+			return nil, err
+		}
+		if out.Channel.Version == nil {
+			return nil, fmt.Errorf("channel %s in bucket %s has no assigned version", channel, in.Bucket)
+		}
+		fingerprint = out.Channel.Version.Fingerprint
+	}
 	var version *wireVersion
-	if in.Fingerprint != "" {
-		for i := range versions {
-			if versions[i].Fingerprint == in.Fingerprint {
-				version = &versions[i]
-			}
+	for i := range versions {
+		if versions[i].Fingerprint == fingerprint {
+			version = &versions[i]
 		}
-		if version == nil {
-			return nil, fmt.Errorf("fingerprint %s not found in bucket %s", in.Fingerprint, in.Bucket)
-		}
-	} else if len(versions) > 0 {
-		version = &versions[0]
-	} else {
-		return nil, fmt.Errorf("bucket %s has no versions", in.Bucket)
+	}
+	if version == nil {
+		return nil, fmt.Errorf("fingerprint %s not found in bucket %s", fingerprint, in.Bucket)
 	}
 
 	switch in.Flavor {
