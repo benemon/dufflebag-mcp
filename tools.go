@@ -94,7 +94,7 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "list_buckets",
-			"description": "List a project's registry buckets with their latest version and platforms.",
+			"description": "List a project's registry buckets: latest version, platforms and ancestry freshness. list_versions carries the full build detail.",
 			"inputSchema": schema(nil),
 		},
 		{
@@ -123,7 +123,7 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "vulnerability_summary",
-			"description": "The bucket's package vulnerability summary as reported by the registry's scanner.",
+			"description": "Headline vulnerability counts for a bucket: totals by criticality and the worst packages. list_vulnerabilities carries the per-finding detail.",
 			"inputSchema": schema(map[string]any{"bucket": map[string]any{"type": "string"}}, "bucket"),
 		},
 		{
@@ -301,17 +301,46 @@ func createProject(c *client, args json.RawMessage) (map[string]any, error) {
 	return textResult(out)
 }
 
+// listBuckets projects the compat response down to what a listing is for:
+// the full latest_version carries builds, artifacts and Packer host metadata
+// that costs kilobytes per bucket and answers questions list_versions serves.
 func listBuckets(c *client, args json.RawMessage) (map[string]any, error) {
 	var in tenancyArgs
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
 		return nil, err
 	}
-	var out json.RawMessage
+	var out struct {
+		Buckets []struct {
+			Name          string   `json:"name"`
+			Platforms     []string `json:"platforms"`
+			UpdatedAt     string   `json:"updated_at"`
+			LatestVersion *struct {
+				Name        string  `json:"name"`
+				Fingerprint string  `json:"fingerprint"`
+				Status      string  `json:"status"`
+				RevokeAt    *string `json:"revoke_at"`
+			} `json:"latest_version"`
+			Parents *struct {
+				Status string `json:"status"`
+			} `json:"parents"`
+		} `json:"buckets"`
+	}
 	if err := c.call("GET", compatBase(in.OrganizationID, in.ProjectID)+"/buckets", nil, &out); err != nil {
 		return nil, err
 	}
-	return textResult(out)
+	buckets := make([]map[string]any, 0, len(out.Buckets))
+	for _, bucket := range out.Buckets {
+		entry := map[string]any{"name": bucket.Name, "platforms": bucket.Platforms, "updated_at": bucket.UpdatedAt}
+		if v := bucket.LatestVersion; v != nil {
+			entry["latest"] = map[string]any{"version": v.Name, "fingerprint": v.Fingerprint, "status": v.Status, "revoked": v.RevokeAt != nil}
+		}
+		if p := bucket.Parents; p != nil && p.Status != "" {
+			entry["ancestry"] = p.Status
+		}
+		buckets = append(buckets, entry)
+	}
+	return textResult(map[string]any{"buckets": buckets})
 }
 
 type wireArtifact struct {
@@ -501,6 +530,16 @@ func versionDiff(c *client, args json.RawMessage) (map[string]any, error) {
 	})
 }
 
+// summaryPackageCap bounds the worst-packages list; anything past it is
+// reported as an explicit omission, never silently truncated.
+const summaryPackageCap = 15
+
+var criticalityRank = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "unknown": 4}
+
+// vulnerabilitySummary projects the raw summary — one row per package per
+// criticality, duplicated per channel — down to the totals headline and one
+// aggregated row per package, worst first. list_vulnerabilities is the
+// drill-down.
 func vulnerabilitySummary(c *client, args json.RawMessage) (map[string]any, error) {
 	var in struct {
 		tenancyArgs
@@ -513,11 +552,80 @@ func vulnerabilitySummary(c *client, args json.RawMessage) (map[string]any, erro
 	if in.Bucket == "" {
 		return nil, fmt.Errorf("bucket is required")
 	}
-	var out json.RawMessage
+	var out struct {
+		Totals []struct {
+			Criticality string `json:"criticality"`
+			Count       string `json:"vulnerability_count"`
+		} `json:"total_by_criticality"`
+		Packages []struct {
+			Name        string `json:"package_name"`
+			Version     string `json:"package_version"`
+			Criticality string `json:"criticality"`
+			Count       string `json:"vulnerability_count"`
+		} `json:"packages_by_criticality"`
+	}
 	if err := c.call("GET", compatBase(in.OrganizationID, in.ProjectID)+"/buckets/"+url.PathEscape(in.Bucket)+"/packages/vulnerability-summary", nil, &out); err != nil {
 		return nil, err
 	}
-	return textResult(out)
+
+	sort.SliceStable(out.Totals, func(i, j int) bool {
+		return criticalityRank[out.Totals[i].Criticality] < criticalityRank[out.Totals[j].Criticality]
+	})
+	totals := make([]map[string]any, 0, len(out.Totals))
+	for _, total := range out.Totals {
+		count, _ := strconv.Atoi(total.Count)
+		totals = append(totals, map[string]any{"criticality": total.Criticality, "count": count})
+	}
+
+	type packageRow struct {
+		name   string
+		counts map[string]int
+		total  int
+		worst  int
+	}
+	aggregated := map[string]*packageRow{}
+	for _, p := range out.Packages {
+		key := p.Name + " " + p.Version
+		row, ok := aggregated[key]
+		if !ok {
+			row = &packageRow{name: key, counts: map[string]int{}, worst: len(criticalityRank)}
+			aggregated[key] = row
+		}
+		count, _ := strconv.Atoi(p.Count)
+		row.counts[p.Criticality] += count
+		row.total += count
+		if rank := criticalityRank[p.Criticality]; rank < row.worst {
+			row.worst = rank
+		}
+	}
+	rows := make([]*packageRow, 0, len(aggregated))
+	for _, row := range aggregated {
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].worst != rows[j].worst {
+			return rows[i].worst < rows[j].worst
+		}
+		if rows[i].total != rows[j].total {
+			return rows[i].total > rows[j].total
+		}
+		return rows[i].name < rows[j].name
+	})
+	omitted := 0
+	if len(rows) > summaryPackageCap {
+		omitted = len(rows) - summaryPackageCap
+		rows = rows[:summaryPackageCap]
+	}
+	packages := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		packages = append(packages, map[string]any{"package": row.name, "counts": row.counts, "total": row.total})
+	}
+
+	result := map[string]any{"bucket": in.Bucket, "total_by_criticality": totals, "worst_packages": packages}
+	if omitted > 0 {
+		result["omitted"] = fmt.Sprintf("%d more packages — use list_vulnerabilities to drill down", omitted)
+	}
+	return textResult(result)
 }
 
 func bagdropStatus(c *client, args json.RawMessage) (map[string]any, error) {
