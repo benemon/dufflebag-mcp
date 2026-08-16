@@ -323,6 +323,10 @@ func TestFindArtifactEnumerates(t *testing.T) {
 		t.Fatalf("enumeration honesty missing: %#v", decoded)
 	}
 
+	if _, fallback := decoded["fallback"]; !fallback {
+		t.Fatalf("pre-endpoint registry must report the enumeration fallback: %#v", decoded)
+	}
+
 	decoded = resultJSON(t, mustCall(t, findArtifact, c, `{"external_identifier":"sha256:absent"}`))
 	if len(decoded["matches"].([]any)) != 0 {
 		t.Fatalf("absent digest matched: %#v", decoded)
@@ -516,5 +520,42 @@ func TestVulnerabilitySummaryProjection(t *testing.T) {
 	omitted, _ := decoded["omitted"].(string)
 	if !strings.Contains(omitted, "3 more packages") {
 		t.Fatalf("omission not explicit: %#v", decoded)
+	}
+}
+
+func TestFindArtifactUsesSearchEndpoint(t *testing.T) {
+	var enumerated bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+compatPath("/_search/external_artifact"), func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["external_identifier"] != "sha256:new" {
+			t.Errorf("identifier not forwarded: %v", body)
+		}
+		writeJSON(w, map[string]any{"artifacts": []map[string]any{{
+			"bucket": map[string]any{"name": "demo"},
+			"build": map[string]any{
+				"component_type": "docker.distro", "platform": "docker",
+				"artifacts": []map[string]any{{"external_identifier": "sha256:new", "region": "docker"}},
+			},
+			"version": map[string]any{"name": "v2", "fingerprint": "fp-v2", "status": "VERSION_ACTIVE"},
+		}}})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets"), func(w http.ResponseWriter, r *http.Request) {
+		enumerated = true
+		writeJSON(w, map[string]any{"buckets": []map[string]any{}})
+	})
+	c := testClient(t, mux)
+
+	decoded := resultJSON(t, mustCall(t, findArtifact, c, `{"external_identifier":"sha256:new"}`))
+	match := decoded["matches"].([]any)[0].(map[string]any)
+	if match["bucket"] != "demo" || match["fingerprint"] != "fp-v2" || match["region"] != "docker" {
+		t.Fatalf("endpoint match wrong: %#v", match)
+	}
+	if enumerated {
+		t.Fatalf("endpoint hit must not fall back to enumeration")
+	}
+	if _, fallback := decoded["fallback"]; fallback {
+		t.Fatalf("endpoint path must not report the fallback: %#v", decoded)
 	}
 }

@@ -172,7 +172,7 @@ func toolDefinitions() []map[string]any {
 		},
 		{
 			"name":        "find_artifact",
-			"description": "Find which bucket and version produced an artifact from its external identifier (image digest, AMI id) — provenance in reverse. Enumerates the project's buckets.",
+			"description": "Find which bucket and version produced an artifact from its external identifier (image digest, AMI id) — provenance in reverse. Uses the registry's search endpoint, enumerating buckets only against registries that predate it.",
 			"inputSchema": schema(map[string]any{
 				"external_identifier": map[string]any{"type": "string"},
 			}, "external_identifier"),
@@ -977,24 +977,80 @@ func findArtifact(c *client, args json.RawMessage) (map[string]any, error) {
 	if in.ExternalIdentifier == "" {
 		return nil, fmt.Errorf("external_identifier is required")
 	}
+
+	var out struct {
+		Artifacts []struct {
+			Bucket *struct {
+				Name string `json:"name"`
+			} `json:"bucket"`
+			Build   *wireBuild `json:"build"`
+			Version *struct {
+				Name        string  `json:"name"`
+				Fingerprint string  `json:"fingerprint"`
+				Status      string  `json:"status"`
+				RevokeAt    *string `json:"revoke_at"`
+			} `json:"version"`
+		} `json:"artifacts"`
+	}
+	err := c.call("POST", compatBase(in.OrganizationID, in.ProjectID)+"/_search/external_artifact",
+		map[string]string{"external_identifier": in.ExternalIdentifier}, &out)
+	var httpErr *httpError
+	if errors.As(err, &httpErr) && httpErr.status == 404 {
+		// The registry predates the search endpoint; fall back to walking
+		// the project's buckets and say so.
+		return findArtifactByEnumeration(c, in.tenancyArgs, in.ExternalIdentifier)
+	}
+	if err != nil {
+		return nil, err
+	}
+	matches := []map[string]any{}
+	for _, artifact := range out.Artifacts {
+		entry := map[string]any{}
+		if artifact.Bucket != nil {
+			entry["bucket"] = artifact.Bucket.Name
+		}
+		if v := artifact.Version; v != nil {
+			entry["version"] = v.Name
+			entry["fingerprint"] = v.Fingerprint
+			entry["status"] = v.Status
+			entry["revoked"] = v.RevokeAt != nil
+		}
+		if build := artifact.Build; build != nil {
+			entry["platform"] = build.Platform
+			entry["component_type"] = build.ComponentType
+			for _, candidate := range build.Artifacts {
+				if candidate.ExternalIdentifier == in.ExternalIdentifier {
+					entry["region"] = candidate.Region
+				}
+			}
+		}
+		matches = append(matches, entry)
+	}
+	return textResult(map[string]any{
+		"external_identifier": in.ExternalIdentifier,
+		"matches":             matches,
+	})
+}
+
+func findArtifactByEnumeration(c *client, tenancy tenancyArgs, externalIdentifier string) (map[string]any, error) {
 	var buckets struct {
 		Buckets []struct {
 			Name string `json:"name"`
 		} `json:"buckets"`
 	}
-	if err := c.call("GET", compatBase(in.OrganizationID, in.ProjectID)+"/buckets", nil, &buckets); err != nil {
+	if err := c.call("GET", compatBase(tenancy.OrganizationID, tenancy.ProjectID)+"/buckets", nil, &buckets); err != nil {
 		return nil, err
 	}
 	matches := []map[string]any{}
 	for _, bucket := range buckets.Buckets {
-		versions, err := fetchVersions(c, in.tenancyArgs, bucket.Name)
+		versions, err := fetchVersions(c, tenancy, bucket.Name)
 		if err != nil {
 			return nil, err
 		}
 		for _, version := range versions {
 			for _, build := range version.Builds {
 				for _, artifact := range build.Artifacts {
-					if artifact.ExternalIdentifier != in.ExternalIdentifier {
+					if artifact.ExternalIdentifier != externalIdentifier {
 						continue
 					}
 					matches = append(matches, map[string]any{
@@ -1012,9 +1068,10 @@ func findArtifact(c *client, args json.RawMessage) (map[string]any, error) {
 		}
 	}
 	return textResult(map[string]any{
-		"external_identifier": in.ExternalIdentifier,
+		"external_identifier": externalIdentifier,
 		"matches":             matches,
 		"buckets_searched":    len(buckets.Buckets),
+		"fallback":            "the registry predates the search endpoint; buckets were enumerated",
 	})
 }
 
