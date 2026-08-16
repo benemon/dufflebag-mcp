@@ -11,10 +11,10 @@ import (
 	"strings"
 )
 
-// readOnly reports the deployment posture: with DUFFLEBAG_MCP_READ_ONLY set,
+// readOnly reports the deployment posture: with DFBG_MCP_READ_ONLY set,
 // mutating tools are neither listed nor callable.
 func readOnly() bool {
-	v, _ := strconv.ParseBool(os.Getenv("DUFFLEBAG_MCP_READ_ONLY"))
+	v, _ := strconv.ParseBool(os.Getenv("DFBG_MCP_READ_ONLY"))
 	return v
 }
 
@@ -34,20 +34,20 @@ type tenancyArgs struct {
 
 func (t *tenancyArgs) resolve() error {
 	if t.OrganizationID == "" {
-		t.OrganizationID = os.Getenv("DUFFLEBAG_MCP_ORGANIZATION_ID")
+		t.OrganizationID = os.Getenv("DFBG_MCP_ORGANIZATION_ID")
 	}
 	if t.ProjectID == "" {
-		t.ProjectID = os.Getenv("DUFFLEBAG_MCP_PROJECT_ID")
+		t.ProjectID = os.Getenv("DFBG_MCP_PROJECT_ID")
 	}
 	if t.OrganizationID == "" || t.ProjectID == "" {
-		return fmt.Errorf("organization_id and project_id are required (or set DUFFLEBAG_MCP_ORGANIZATION_ID / DUFFLEBAG_MCP_PROJECT_ID)")
+		return fmt.Errorf("organization_id and project_id are required (or set DFBG_MCP_ORGANIZATION_ID / DFBG_MCP_PROJECT_ID)")
 	}
 	return nil
 }
 
 var tenancyProperties = map[string]any{
-	"organization_id": map[string]any{"type": "string", "description": "Organization id (falls back to DUFFLEBAG_MCP_ORGANIZATION_ID)"},
-	"project_id":      map[string]any{"type": "string", "description": "Project id (falls back to DUFFLEBAG_MCP_PROJECT_ID)"},
+	"organization_id": map[string]any{"type": "string", "description": "Organization id (falls back to DFBG_MCP_ORGANIZATION_ID)"},
+	"project_id":      map[string]any{"type": "string", "description": "Project id (falls back to DFBG_MCP_PROJECT_ID)"},
 }
 
 func schema(extra map[string]any, required ...string) map[string]any {
@@ -207,7 +207,7 @@ func callTool(c *client, params json.RawMessage) (map[string]any, error) {
 		return nil, fmt.Errorf("unknown tool %q", call.Name)
 	}
 	if writeTools[call.Name] && readOnly() {
-		return nil, fmt.Errorf("tool %q is disabled: this server runs read-only (DUFFLEBAG_MCP_READ_ONLY)", call.Name)
+		return nil, fmt.Errorf("tool %q is disabled: this server runs read-only (DFBG_MCP_READ_ONLY)", call.Name)
 	}
 	return handler(c, args)
 }
@@ -274,7 +274,7 @@ func listProjects(c *client, args json.RawMessage) (map[string]any, error) {
 	}
 	_ = json.Unmarshal(args, &in)
 	if in.OrganizationID == "" {
-		in.OrganizationID = os.Getenv("DUFFLEBAG_MCP_ORGANIZATION_ID")
+		in.OrganizationID = os.Getenv("DFBG_MCP_ORGANIZATION_ID")
 	}
 	if in.OrganizationID == "" {
 		return nil, fmt.Errorf("organization_id is required")
@@ -641,9 +641,9 @@ func whoami(c *client, _ json.RawMessage) (map[string]any, error) {
 	if self.ProjectID != "" {
 		result["project_id"] = self.ProjectID
 	}
-	if org := os.Getenv("DUFFLEBAG_MCP_ORGANIZATION_ID"); org != "" {
+	if org := os.Getenv("DFBG_MCP_ORGANIZATION_ID"); org != "" {
 		result["default_organization"] = tenantRef(c, "/api/v1/organizations/"+url.PathEscape(org), org)
-		if project := os.Getenv("DUFFLEBAG_MCP_PROJECT_ID"); project != "" {
+		if project := os.Getenv("DFBG_MCP_PROJECT_ID"); project != "" {
 			result["default_project"] = tenantRef(c, "/api/v1/organizations/"+url.PathEscape(org)+"/projects/"+url.PathEscape(project), project)
 		}
 	}

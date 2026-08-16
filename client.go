@@ -28,14 +28,14 @@ type client struct {
 }
 
 func newClientFromEnv() (*client, error) {
-	endpoint := strings.TrimRight(os.Getenv("DUFFLEBAG_MCP_ENDPOINT"), "/")
-	id := os.Getenv("DUFFLEBAG_MCP_CLIENT_ID")
-	secret := os.Getenv("DUFFLEBAG_MCP_CLIENT_SECRET")
+	endpoint := strings.TrimRight(os.Getenv("DFBG_MCP_ENDPOINT"), "/")
+	id := os.Getenv("DFBG_MCP_CLIENT_ID")
+	secret := os.Getenv("DFBG_MCP_CLIENT_SECRET")
 	if endpoint == "" || id == "" || secret == "" {
-		return nil, fmt.Errorf("DUFFLEBAG_MCP_ENDPOINT, DUFFLEBAG_MCP_CLIENT_ID and DUFFLEBAG_MCP_CLIENT_SECRET are required")
+		return nil, fmt.Errorf("DFBG_MCP_ENDPOINT, DFBG_MCP_CLIENT_ID and DFBG_MCP_CLIENT_SECRET are required")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	if caFile := os.Getenv("DUFFLEBAG_MCP_CA_FILE"); caFile != "" {
+	if caFile := os.Getenv("DFBG_MCP_CA_FILE"); caFile != "" {
 		pem, err := os.ReadFile(caFile)
 		if err != nil {
 			return nil, fmt.Errorf("read CA file: %w", err)

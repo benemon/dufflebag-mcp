@@ -7,13 +7,13 @@
 //
 // Configuration (environment):
 //
-//	DUFFLEBAG_MCP_ENDPOINT        base URL, e.g. https://dufflebag.lab.orbital.home:8443
-//	DUFFLEBAG_MCP_CLIENT_ID       service principal client id
-//	DUFFLEBAG_MCP_CLIENT_SECRET   service principal client secret
-//	DUFFLEBAG_MCP_CA_FILE         optional PEM chain for a private CA
-//	DUFFLEBAG_MCP_ORGANIZATION_ID default organization for tenancy-scoped tools
-//	DUFFLEBAG_MCP_PROJECT_ID      default project for tenancy-scoped tools
-//	DUFFLEBAG_MCP_READ_ONLY       when truthy, mutating tools are neither listed nor callable
+//	DFBG_MCP_ENDPOINT        base URL, e.g. https://dufflebag.lab.orbital.home:8443
+//	DFBG_MCP_CLIENT_ID       service principal client id
+//	DFBG_MCP_CLIENT_SECRET   service principal client secret
+//	DFBG_MCP_CA_FILE         optional PEM chain for a private CA
+//	DFBG_MCP_ORGANIZATION_ID default organization for tenancy-scoped tools
+//	DFBG_MCP_PROJECT_ID      default project for tenancy-scoped tools
+//	DFBG_MCP_READ_ONLY       when truthy, mutating tools are neither listed nor callable
 package main
 
 import (
