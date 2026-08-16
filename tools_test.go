@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -436,4 +437,84 @@ func mustCall(t *testing.T, handler func(*client, json.RawMessage) (map[string]a
 		t.Fatalf("handler failed: %v", err)
 	}
 	return result
+}
+
+func TestListBucketsCompactProjection(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+compatPath("/buckets"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"buckets": []map[string]any{
+			{
+				"name": "demo", "platforms": []string{"docker"}, "updated_at": "2026-08-16T00:00:00Z",
+				"latest_version": map[string]any{
+					"name": "v2", "fingerprint": "fp-v2", "status": "VERSION_ACTIVE",
+					"builds": []map[string]any{{"id": "b2", "labels": map[string]string{"huge": "metadata"}}},
+				},
+				"parents": map[string]any{"status": "OUT_OF_DATE"},
+			},
+			{"name": "empty-bucket", "platforms": []string{}, "updated_at": "2026-08-16T00:00:00Z"},
+		}})
+	})
+	c := testClient(t, mux)
+
+	decoded := resultJSON(t, mustCall(t, listBuckets, c, `{}`))
+	buckets := decoded["buckets"].([]any)
+	if len(buckets) != 2 {
+		t.Fatalf("want 2 buckets, got %#v", decoded)
+	}
+	first := buckets[0].(map[string]any)
+	latest := first["latest"].(map[string]any)
+	if latest["version"] != "v2" || latest["revoked"] != false || first["ancestry"] != "OUT_OF_DATE" {
+		t.Fatalf("projection wrong: %#v", first)
+	}
+	// The projection's whole point: build detail must not pass through.
+	if strings.Contains(resultText(t, mustCall(t, listBuckets, c, `{}`)), "huge") {
+		t.Fatalf("build metadata leaked through the projection")
+	}
+	second := buckets[1].(map[string]any)
+	if _, ok := second["latest"]; ok {
+		t.Fatalf("version-less bucket must omit latest: %#v", second)
+	}
+}
+
+func TestVulnerabilitySummaryProjection(t *testing.T) {
+	packages := []map[string]any{
+		{"package_name": "libc6", "package_version": "2.31", "criticality": "critical", "vulnerability_count": "6"},
+		{"package_name": "libc6", "package_version": "2.31", "criticality": "high", "vulnerability_count": "20"},
+		{"package_name": "bzip2", "package_version": "1.0.8", "criticality": "medium", "vulnerability_count": "2"},
+	}
+	for i := 0; i < 16; i++ {
+		packages = append(packages, map[string]any{
+			"package_name": "filler-" + strconv.Itoa(i), "package_version": "1",
+			"criticality": "low", "vulnerability_count": "1",
+		})
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/packages/vulnerability-summary"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"total_by_criticality": []map[string]any{
+				{"criticality": "high", "vulnerability_count": "106"},
+				{"criticality": "critical", "vulnerability_count": "46"},
+			},
+			"packages_by_criticality": packages,
+		})
+	})
+	c := testClient(t, mux)
+
+	decoded := resultJSON(t, mustCall(t, vulnerabilitySummary, c, `{"bucket":"demo"}`))
+	totals := decoded["total_by_criticality"].([]any)
+	if totals[0].(map[string]any)["criticality"] != "critical" {
+		t.Fatalf("totals not ordered worst-first: %#v", totals)
+	}
+	worst := decoded["worst_packages"].([]any)
+	if len(worst) != summaryPackageCap {
+		t.Fatalf("cap not applied: %d rows", len(worst))
+	}
+	top := worst[0].(map[string]any)
+	if top["package"] != "libc6 2.31" || top["total"] != float64(26) {
+		t.Fatalf("aggregation wrong: %#v", top)
+	}
+	omitted, _ := decoded["omitted"].(string)
+	if !strings.Contains(omitted, "3 more packages") {
+		t.Fatalf("omission not explicit: %#v", decoded)
+	}
 }
