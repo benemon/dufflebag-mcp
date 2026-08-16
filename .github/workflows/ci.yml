@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: make build
+      - name: Run tests
+        run: make test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run linters
+        run: make lint
+
+  check-markers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Check for AI-tooling markers
+        run: make check-markers
+
+  # The continuous head-of-main image, the same convention as the dufflebag
+  # repository: release.yml is deliberate — a tag is the release act — whereas
+  # this moves automatically with main. Every green push republishes
+  # quay.io/.../dufflebag-mcp:latest, so :latest is only ever a fully
+  # validated commit. Push-only: there is nothing to publish from a PR.
+  publish-latest:
+    if: ${{ github.event_name == 'push' }}
+    needs: [build, lint, check-markers]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Log in to Quay
+        uses: docker/login-action@v4
+        with:
+          registry: quay.io
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+      - name: Build and push the latest image
+        run: make image-push-release IMAGE_TAG=latest

@@ -320,11 +320,11 @@ type wireArtifact struct {
 }
 
 type wireBuild struct {
-	ID            string         `json:"id"`
-	ComponentType string         `json:"component_type"`
-	Status        string         `json:"status"`
-	Platform      string         `json:"platform"`
-	Artifacts     []wireArtifact `json:"artifacts"`
+	ID            string            `json:"id"`
+	ComponentType string            `json:"component_type"`
+	Status        string            `json:"status"`
+	Platform      string            `json:"platform"`
+	Artifacts     []wireArtifact    `json:"artifacts"`
 	Labels        map[string]string `json:"labels"`
 }
 
