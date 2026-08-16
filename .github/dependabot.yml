@@ -1,0 +1,22 @@
+# Two ecosystems, one grouped PR each — the dufflebag convention scaled to
+# this repository. The Go module is stdlib-only today, so the gomod entry
+# covers the toolchain directive and any dependency that later appears. No
+# docker entry: the Containerfile tracks moving tags, which dependabot has
+# nothing to bump.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ["*"]
