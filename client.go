@@ -137,7 +137,7 @@ func (c *client) call(method, path string, payload any, out any) error {
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(data)))
+			return &httpError{status: resp.StatusCode, message: fmt.Sprintf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(data)))}
 		}
 		if out == nil {
 			return nil
@@ -148,6 +148,15 @@ func (c *client) call(method, path string, payload any, out any) error {
 		return nil
 	}
 }
+
+// httpError carries the status code so a caller can react to a specific
+// status (promote_channel creates the channel on 404).
+type httpError struct {
+	status  int
+	message string
+}
+
+func (e *httpError) Error() string { return e.message }
 
 func compatBase(org, project string) string {
 	return fmt.Sprintf("/packer/2023-01-01/organizations/%s/projects/%s", url.PathEscape(org), url.PathEscape(project))

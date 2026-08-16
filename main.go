@@ -7,10 +7,13 @@
 //
 // Configuration (environment):
 //
-//	DUFFLEBAG_MCP_ENDPOINT      base URL, e.g. https://dufflebag.lab.orbital.home:8443
-//	DUFFLEBAG_MCP_CLIENT_ID     service principal client id
-//	DUFFLEBAG_MCP_CLIENT_SECRET service principal client secret
-//	DUFFLEBAG_MCP_CA_FILE       optional PEM chain for a private CA
+//	DUFFLEBAG_MCP_ENDPOINT        base URL, e.g. https://dufflebag.lab.orbital.home:8443
+//	DUFFLEBAG_MCP_CLIENT_ID       service principal client id
+//	DUFFLEBAG_MCP_CLIENT_SECRET   service principal client secret
+//	DUFFLEBAG_MCP_CA_FILE         optional PEM chain for a private CA
+//	DUFFLEBAG_MCP_ORGANIZATION_ID default organization for tenancy-scoped tools
+//	DUFFLEBAG_MCP_PROJECT_ID      default project for tenancy-scoped tools
+//	DUFFLEBAG_MCP_READ_ONLY       when truthy, mutating tools are neither listed nor callable
 package main
 
 import (
@@ -73,7 +76,7 @@ func main() {
 			resp.Result = map[string]any{
 				"protocolVersion": protocolVersion,
 				"capabilities":    map[string]any{"tools": map[string]any{}},
-				"serverInfo":      map[string]any{"name": "dufflebag-mcp", "version": "0.1.0"},
+				"serverInfo":      map[string]any{"name": "dufflebag-mcp", "version": "0.2.0"},
 			}
 		case "ping":
 			resp.Result = map[string]any{}
