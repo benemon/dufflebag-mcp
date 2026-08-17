@@ -19,6 +19,23 @@ Configuration, deployment, the environment reference, and the full tool
 surface are documented in the
 [dufflebag documentation](https://benemon.github.io/dufflebag/integrations/mcp-server).
 
+## Configuration
+
+| Variable | Description |
+| --- | --- |
+| `DFBG_MCP_ENDPOINT` | Dufflebag base URL. |
+| `DFBG_MCP_CLIENT_ID` | Service principal client id. |
+| `DFBG_MCP_CLIENT_SECRET` | Service principal client secret. |
+| `DFBG_MCP_CA_FILE` | Optional PEM chain for a private CA. |
+| `DFBG_MCP_ORGANIZATION_ID` | Optional default organization for tenancy-scoped tools. |
+| `DFBG_MCP_PROJECT_ID` | Optional default project for tenancy-scoped tools. |
+| `DFBG_MCP_BUCKET_ID` | Optional default bucket id for bucket-scoped tools. |
+| `DFBG_MCP_READ_ONLY` | When true, mutating tools are neither listed nor callable. |
+
+Bucket-scoped service principals use the existing client id and secret
+variables. Set `DFBG_MCP_BUCKET_ID` to the bucket's ULID (its id, not its
+name) so bucket-taking tools can omit their bucket argument.
+
 ## Build
 
 ```sh

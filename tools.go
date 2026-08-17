@@ -58,6 +58,15 @@ func schema(extra map[string]any, required ...string) map[string]any {
 	for k, v := range extra {
 		properties[k] = v
 	}
+	if os.Getenv("DFBG_MCP_BUCKET_ID") != "" {
+		filtered := make([]string, 0, len(required))
+		for _, name := range required {
+			if name != "bucket" {
+				filtered = append(filtered, name)
+			}
+		}
+		required = filtered
+	}
 	s := map[string]any{"type": "object", "properties": properties}
 	if len(required) > 0 {
 		s["required"] = required
@@ -384,6 +393,9 @@ func listVersions(c *client, args json.RawMessage) (map[string]any, error) {
 	if err := in.resolve(); err != nil {
 		return nil, err
 	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
+		return nil, err
+	}
 	if in.Bucket == "" {
 		return nil, fmt.Errorf("bucket is required")
 	}
@@ -401,6 +413,9 @@ func listChannels(c *client, args json.RawMessage) (map[string]any, error) {
 	}
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
+		return nil, err
+	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
 		return nil, err
 	}
 	if in.Bucket == "" {
@@ -421,6 +436,9 @@ func resolveChannel(c *client, args json.RawMessage) (map[string]any, error) {
 	}
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
+		return nil, err
+	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
 		return nil, err
 	}
 	if in.Bucket == "" || in.Channel == "" {
@@ -465,6 +483,9 @@ func versionDiff(c *client, args json.RawMessage) (map[string]any, error) {
 	}
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
+		return nil, err
+	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
 		return nil, err
 	}
 	if in.Bucket == "" || in.FingerprintA == "" || in.FingerprintB == "" {
@@ -547,6 +568,9 @@ func vulnerabilitySummary(c *client, args json.RawMessage) (map[string]any, erro
 	}
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
+		return nil, err
+	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
 		return nil, err
 	}
 	if in.Bucket == "" {
@@ -653,6 +677,9 @@ func consumeSnippet(c *client, args json.RawMessage) (map[string]any, error) {
 	if err := in.resolve(); err != nil {
 		return nil, err
 	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
+		return nil, err
+	}
 	if in.Bucket == "" {
 		return nil, fmt.Errorf("bucket is required")
 	}
@@ -749,11 +776,24 @@ func whoami(c *client, _ json.RawMessage) (map[string]any, error) {
 	if self.ProjectID != "" {
 		result["project_id"] = self.ProjectID
 	}
-	if org := os.Getenv("DFBG_MCP_ORGANIZATION_ID"); org != "" {
+	org := os.Getenv("DFBG_MCP_ORGANIZATION_ID")
+	project := os.Getenv("DFBG_MCP_PROJECT_ID")
+	if org != "" {
 		result["default_organization"] = tenantRef(c, "/api/v1/organizations/"+url.PathEscape(org), org)
-		if project := os.Getenv("DFBG_MCP_PROJECT_ID"); project != "" {
+		if project != "" {
 			result["default_project"] = tenantRef(c, "/api/v1/organizations/"+url.PathEscape(org)+"/projects/"+url.PathEscape(project), project)
 		}
+	}
+	if bucketID := os.Getenv("DFBG_MCP_BUCKET_ID"); bucketID != "" {
+		var tenancy tenancyArgs
+		if err := tenancy.resolve(); err != nil {
+			return nil, err
+		}
+		name, err := c.scopedBucketName(tenancy.OrganizationID, tenancy.ProjectID, bucketID)
+		if err != nil {
+			return nil, err
+		}
+		result["default_bucket"] = map[string]any{"id": bucketID, "name": name}
 	}
 	return textResult(result)
 }
@@ -780,6 +820,9 @@ func promoteChannel(c *client, args json.RawMessage) (map[string]any, error) {
 	}
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
+		return nil, err
+	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
 		return nil, err
 	}
 	if in.Bucket == "" || in.Channel == "" || in.Fingerprint == "" {
@@ -820,6 +863,9 @@ func checkAncestry(c *client, args json.RawMessage) (map[string]any, error) {
 	}
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
+		return nil, err
+	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
 		return nil, err
 	}
 	if in.Bucket == "" {
@@ -894,6 +940,9 @@ func listVulnerabilities(c *client, args json.RawMessage) (map[string]any, error
 	}
 	_ = json.Unmarshal(args, &in)
 	if err := in.resolve(); err != nil {
+		return nil, err
+	}
+	if err := c.defaultBucket(in.OrganizationID, in.ProjectID, &in.Bucket); err != nil {
 		return nil, err
 	}
 	if in.Bucket == "" {

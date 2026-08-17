@@ -22,9 +22,12 @@ type client struct {
 	clientSecret string
 	http         *http.Client
 
-	mu      sync.Mutex
-	token   string
-	expires time.Time
+	mu         sync.Mutex
+	token      string
+	expires    time.Time
+	bucketOnce sync.Once
+	bucketName string
+	bucketErr  error
 }
 
 func newClientFromEnv() (*client, error) {
@@ -53,6 +56,57 @@ func newClientFromEnv() (*client, error) {
 		endpoint: endpoint, clientID: id, clientSecret: secret,
 		http: &http.Client{Transport: transport, Timeout: 30 * time.Second},
 	}, nil
+}
+
+// defaultBucket resolves the configured bucket id to the compat plane's
+// bucket name when a tool call omits its bucket argument.
+func (c *client) defaultBucket(org, project string, bucket *string) error {
+	if *bucket != "" {
+		return nil
+	}
+	bucketID := os.Getenv("DFBG_MCP_BUCKET_ID")
+	if bucketID == "" {
+		return nil
+	}
+	name, err := c.scopedBucketName(org, project, bucketID)
+	if err != nil {
+		return err
+	}
+	*bucket = name
+	return nil
+}
+
+func (c *client) scopedBucketName(org, project, bucketID string) (string, error) {
+	if bucketID == "" {
+		return "", nil
+	}
+	c.bucketOnce.Do(func() {
+		var out struct {
+			Buckets []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"buckets"`
+		}
+		if err := c.call("GET", compatBase(org, project)+"/buckets", nil, &out); err != nil {
+			c.bucketErr = err
+			return
+		}
+		visible := make([]string, 0, len(out.Buckets))
+		for _, bucket := range out.Buckets {
+			visible = append(visible, bucket.ID)
+			if bucket.ID == bucketID {
+				c.bucketName = bucket.Name
+			}
+		}
+		if c.bucketName == "" {
+			ids := strings.Join(visible, ", ")
+			if ids == "" {
+				ids = "(none)"
+			}
+			c.bucketErr = fmt.Errorf("DFBG_MCP_BUCKET_ID %q does not match a visible bucket; visible bucket ids: %s", bucketID, ids)
+		}
+	})
+	return c.bucketName, c.bucketErr
 }
 
 func (c *client) bearer() (string, error) {

@@ -29,6 +29,7 @@ func testClient(t *testing.T, mux *http.ServeMux) *client {
 	t.Cleanup(server.Close)
 	t.Setenv("DFBG_MCP_ORGANIZATION_ID", testOrg)
 	t.Setenv("DFBG_MCP_PROJECT_ID", testProject)
+	t.Setenv("DFBG_MCP_BUCKET_ID", "")
 	return &client{endpoint: server.URL, clientID: "id", clientSecret: "secret", http: server.Client()}
 }
 
@@ -294,6 +295,147 @@ func TestWhoamiResolvesDefaults(t *testing.T) {
 	org := decoded["default_organization"].(map[string]any)
 	if org["name"] != "demo-organisation" {
 		t.Fatalf("default organization name not resolved: %#v", decoded)
+	}
+}
+
+func TestBucketScopeUnsetKeepsBucketRequired(t *testing.T) {
+	t.Setenv("DFBG_MCP_BUCKET_ID", "")
+	calls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	})
+	c := testClient(t, mux)
+
+	if _, err := listVersions(c, json.RawMessage(`{}`)); err == nil || err.Error() != "bucket is required" {
+		t.Fatalf("unset bucket scope changed validation: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("unset bucket scope made %d requests, want none", calls)
+	}
+	for _, def := range toolDefinitions() {
+		if def["name"] != "list_versions" {
+			continue
+		}
+		required := def["inputSchema"].(map[string]any)["required"].([]string)
+		if len(required) != 1 || required[0] != "bucket" {
+			t.Fatalf("unset bucket scope changed schema: %#v", required)
+		}
+	}
+}
+
+func TestBucketScopeDefaultsAllBucketToolsAndCaches(t *testing.T) {
+	const bucketID = "01K2K1JQ5QXHCHM4Y3Q8ZR1A6B"
+	listCalls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+compatPath("/buckets"), func(w http.ResponseWriter, r *http.Request) {
+		listCalls++
+		writeJSON(w, map[string]any{"buckets": []map[string]any{{"id": bucketID, "name": "demo"}}})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/versions"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, demoVersions())
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/channels"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"channels": []map[string]any{}})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/channels/release"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"channel": map[string]any{"name": "release", "version": map[string]any{"name": "v1", "fingerprint": "fp-v1"}}})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/packages/vulnerability-summary"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"total_by_criticality": []map[string]any{}, "packages_by_criticality": []map[string]any{}})
+	})
+	mux.HandleFunc("PATCH "+compatPath("/buckets/demo/channels/staging"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"channel": map[string]any{"name": "staging", "version": map[string]any{"name": "v1", "fingerprint": "fp-v1"}}})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/ancestry"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"relations": []map[string]any{}, "total_count": 0})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/vulnerabilities"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"vulnerabilities": []map[string]any{}})
+	})
+	c := testClient(t, mux)
+	t.Setenv("DFBG_MCP_BUCKET_ID", bucketID)
+
+	tests := []struct {
+		name    string
+		handler func(*client, json.RawMessage) (map[string]any, error)
+		args    string
+	}{
+		{"list_versions", listVersions, `{}`},
+		{"list_channels", listChannels, `{}`},
+		{"resolve_channel", resolveChannel, `{"channel":"release"}`},
+		{"version_diff", versionDiff, `{"fingerprint_a":"fp-v1","fingerprint_b":"fp-v2"}`},
+		{"vulnerability_summary", vulnerabilitySummary, `{}`},
+		{"consume_snippet", consumeSnippet, `{"fingerprint":"fp-v1"}`},
+		{"promote_channel", promoteChannel, `{"channel":"staging","fingerprint":"fp-v1"}`},
+		{"check_ancestry", checkAncestry, `{}`},
+		{"list_vulnerabilities", listVulnerabilities, `{}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mustCall(t, tt.handler, c, tt.args)
+		})
+	}
+	if listCalls != 1 {
+		t.Fatalf("bucket id resolution made %d listing requests, want one", listCalls)
+	}
+
+	for _, def := range toolDefinitions() {
+		for _, tt := range tests {
+			if def["name"] != tt.name {
+				continue
+			}
+			required, _ := def["inputSchema"].(map[string]any)["required"].([]string)
+			for _, name := range required {
+				if name == "bucket" {
+					t.Fatalf("%s still requires bucket under bucket scope", tt.name)
+				}
+			}
+		}
+	}
+}
+
+func TestBucketScopeMismatchNamesDeclaredAndVisibleIDs(t *testing.T) {
+	const declared = "01K2K1JQ5QXHCHM4Y3Q8ZR1A6B"
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+compatPath("/buckets"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"buckets": []map[string]any{
+			{"id": "01K2K1JQ5QXHCHM4Y3Q8ZR1A6C", "name": "demo"},
+			{"id": "01K2K1JQ5QXHCHM4Y3Q8ZR1A6D", "name": "other"},
+		}})
+	})
+	c := testClient(t, mux)
+	t.Setenv("DFBG_MCP_BUCKET_ID", declared)
+
+	_, err := listVersions(c, json.RawMessage(`{}`))
+	if err == nil || !strings.Contains(err.Error(), declared) || !strings.Contains(err.Error(), "01K2K1JQ5QXHCHM4Y3Q8ZR1A6C") || !strings.Contains(err.Error(), "01K2K1JQ5QXHCHM4Y3Q8ZR1A6D") {
+		t.Fatalf("scope mismatch must name declared and visible ids, got %v", err)
+	}
+}
+
+func TestWhoamiReportsBucketBinding(t *testing.T) {
+	const bucketID = "01K2K1JQ5QXHCHM4Y3Q8ZR1A6B"
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/self", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"principal_id": "p-1", "name": "bucket reader", "role": "viewer"})
+	})
+	mux.HandleFunc("GET /api/v1/organizations/"+testOrg, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"id": testOrg, "name": "demo-organisation"})
+	})
+	mux.HandleFunc("GET /api/v1/organizations/"+testOrg+"/projects/"+testProject, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"id": testProject, "name": "demo-project"})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"buckets": []map[string]any{{"id": bucketID, "name": "demo"}}})
+	})
+	c := testClient(t, mux)
+	t.Setenv("DFBG_MCP_BUCKET_ID", bucketID)
+
+	decoded := resultJSON(t, mustCall(t, whoami, c, `{}`))
+	bucket := decoded["default_bucket"].(map[string]any)
+	if bucket["id"] != bucketID || bucket["name"] != "demo" {
+		t.Fatalf("whoami bucket binding wrong: %#v", decoded)
 	}
 }
 

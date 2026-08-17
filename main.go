@@ -13,6 +13,7 @@
 //	DFBG_MCP_CA_FILE         optional PEM chain for a private CA
 //	DFBG_MCP_ORGANIZATION_ID default organization for tenancy-scoped tools
 //	DFBG_MCP_PROJECT_ID      default project for tenancy-scoped tools
+//	DFBG_MCP_BUCKET_ID       default bucket id for bucket-scoped tools
 //	DFBG_MCP_READ_ONLY       when truthy, mutating tools are neither listed nor callable
 package main
 
