@@ -36,6 +36,18 @@ Bucket-scoped service principals use the existing client id and secret
 variables. Set `DFBG_MCP_BUCKET_ID` to the bucket's ULID (its id, not its
 name) so bucket-taking tools can omit their bucket argument.
 
+## Compatibility
+
+The server is version-tolerant rather than version-coupled: most tools speak
+dufflebag's frozen HCP-compatibility plane, and features that touch native
+surfaces degrade when the server predates them. The table states the floor per
+feature; everything else works against any dufflebag release.
+
+| Feature | Needs dufflebag | Below that |
+| --- | --- | --- |
+| `find_artifact` via the search endpoint | ≥ 0.1.0 | Falls back to enumeration. |
+| Declared bucket scoping (`DFBG_MCP_BUCKET_ID`) | ≥ 0.1.0 | Credentials still confine server-side where enforced; the declared default and fail-fast check need the scoped listing. |
+
 ## Build
 
 ```sh
