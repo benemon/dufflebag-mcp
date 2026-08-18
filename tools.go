@@ -759,6 +759,7 @@ func whoami(c *client, _ json.RawMessage) (map[string]any, error) {
 		Role           string `json:"role"`
 		OrganizationID string `json:"organization_id"`
 		ProjectID      string `json:"project_id"`
+		BucketID       string `json:"bucket_id"`
 	}
 	if err := c.call("GET", "/api/v1/self", nil, &self); err != nil {
 		return nil, err
@@ -776,6 +777,9 @@ func whoami(c *client, _ json.RawMessage) (map[string]any, error) {
 	if self.ProjectID != "" {
 		result["project_id"] = self.ProjectID
 	}
+	if self.BucketID != "" {
+		result["bucket_id"] = self.BucketID
+	}
 	org := os.Getenv("DFBG_MCP_ORGANIZATION_ID")
 	project := os.Getenv("DFBG_MCP_PROJECT_ID")
 	if org != "" {
@@ -789,7 +793,7 @@ func whoami(c *client, _ json.RawMessage) (map[string]any, error) {
 		if err := tenancy.resolve(); err != nil {
 			return nil, err
 		}
-		name, err := c.scopedBucketName(tenancy.OrganizationID, tenancy.ProjectID, bucketID)
+		name, err := c.scopedBucketName(tenancy.OrganizationID, tenancy.ProjectID, bucketID, "DFBG_MCP_BUCKET_ID")
 		if err != nil {
 			return nil, err
 		}

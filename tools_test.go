@@ -292,6 +292,9 @@ func TestWhoamiResolvesDefaults(t *testing.T) {
 	if _, bound := decoded["organization_id"]; bound {
 		t.Fatalf("platform-scoped principal must not report a bound organization: %#v", decoded)
 	}
+	if _, bound := decoded["bucket_id"]; bound {
+		t.Fatalf("unscoped principal must not report a bound bucket: %#v", decoded)
+	}
 	org := decoded["default_organization"].(map[string]any)
 	if org["name"] != "demo-organisation" {
 		t.Fatalf("default organization name not resolved: %#v", decoded)
@@ -301,7 +304,14 @@ func TestWhoamiResolvesDefaults(t *testing.T) {
 func TestBucketScopeUnsetKeepsBucketRequired(t *testing.T) {
 	t.Setenv("DFBG_MCP_BUCKET_ID", "")
 	calls := 0
+	selfCalls := 0
 	mux := http.NewServeMux()
+	// An unscoped credential's /self carries no bucket_id (dufflebag's GetSelf
+	// sets the field only when the principal's scope holds one).
+	mux.HandleFunc("GET /api/v1/self", func(w http.ResponseWriter, r *http.Request) {
+		selfCalls++
+		writeJSON(w, map[string]any{"principal_id": "p-1", "name": "initial administrator", "role": "root"})
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		http.Error(w, "unexpected request", http.StatusInternalServerError)
@@ -311,8 +321,14 @@ func TestBucketScopeUnsetKeepsBucketRequired(t *testing.T) {
 	if _, err := listVersions(c, json.RawMessage(`{}`)); err == nil || err.Error() != "bucket is required" {
 		t.Fatalf("unset bucket scope changed validation: %v", err)
 	}
+	if _, err := listVersions(c, json.RawMessage(`{}`)); err == nil || err.Error() != "bucket is required" {
+		t.Fatalf("unset bucket scope changed validation on repeat: %v", err)
+	}
 	if calls != 0 {
-		t.Fatalf("unset bucket scope made %d requests, want none", calls)
+		t.Fatalf("unset bucket scope made %d registry requests, want none", calls)
+	}
+	if selfCalls != 1 {
+		t.Fatalf("unscoped credential resolution made %d /self requests, want one", selfCalls)
 	}
 	for _, def := range toolDefinitions() {
 		if def["name"] != "list_versions" {
@@ -398,7 +414,14 @@ func TestBucketScopeDefaultsAllBucketToolsAndCaches(t *testing.T) {
 
 func TestBucketScopeMismatchNamesDeclaredAndVisibleIDs(t *testing.T) {
 	const declared = "01K2K1JQ5QXHCHM4Y3Q8ZR1A6B"
+	selfCalls := 0
 	mux := http.NewServeMux()
+	// The credential's own binding matches a visible bucket; the declared env
+	// id must still win and fail fast — /self is never consulted when set.
+	mux.HandleFunc("GET /api/v1/self", func(w http.ResponseWriter, r *http.Request) {
+		selfCalls++
+		writeJSON(w, map[string]any{"principal_id": "p-1", "name": "scoped publisher", "role": "publisher", "bucket_id": "01K2K1JQ5QXHCHM4Y3Q8ZR1A6C"})
+	})
 	mux.HandleFunc("GET "+compatPath("/buckets"), func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"buckets": []map[string]any{
 			{"id": "01K2K1JQ5QXHCHM4Y3Q8ZR1A6C", "name": "demo"},
@@ -411,6 +434,9 @@ func TestBucketScopeMismatchNamesDeclaredAndVisibleIDs(t *testing.T) {
 	_, err := listVersions(c, json.RawMessage(`{}`))
 	if err == nil || !strings.Contains(err.Error(), declared) || !strings.Contains(err.Error(), "01K2K1JQ5QXHCHM4Y3Q8ZR1A6C") || !strings.Contains(err.Error(), "01K2K1JQ5QXHCHM4Y3Q8ZR1A6D") {
 		t.Fatalf("scope mismatch must name declared and visible ids, got %v", err)
+	}
+	if selfCalls != 0 {
+		t.Fatalf("declared bucket id must not consult /self, got %d calls", selfCalls)
 	}
 }
 
@@ -436,6 +462,61 @@ func TestWhoamiReportsBucketBinding(t *testing.T) {
 	bucket := decoded["default_bucket"].(map[string]any)
 	if bucket["id"] != bucketID || bucket["name"] != "demo" {
 		t.Fatalf("whoami bucket binding wrong: %#v", decoded)
+	}
+}
+
+func TestWhoamiReportsSelfBucketBinding(t *testing.T) {
+	const bucketID = "01K2K1JQ5QXHCHM4Y3Q8ZR1A6B"
+	mux := http.NewServeMux()
+	// Wire shape from dufflebag's GetSelf (internal/platform/v1/handler.go):
+	// a bucket-scoped principal carries organization_id, project_id and
+	// bucket_id; each field is omitted entirely when its scope is unbound.
+	mux.HandleFunc("GET /api/v1/self", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"principal_id":    "p-2",
+			"name":            "scoped publisher",
+			"role":            "publisher",
+			"organization_id": "0d2645cd-6c15-45cb-a3ec-46b3b7d09a45",
+			"project_id":      "8f0f9b6d-3f0e-4b9e-9c37-0a2f6ab1e9d2",
+			"bucket_id":       bucketID,
+		})
+	})
+	c := testClient(t, mux)
+
+	decoded := resultJSON(t, mustCall(t, whoami, c, `{}`))
+	if decoded["bucket_id"] != bucketID {
+		t.Fatalf("whoami must report the credential's bucket binding: %#v", decoded)
+	}
+	if _, declared := decoded["default_bucket"]; declared {
+		t.Fatalf("default_bucket renders only for DFBG_MCP_BUCKET_ID: %#v", decoded)
+	}
+}
+
+func TestScopedCredentialDefaultsBucket(t *testing.T) {
+	const bucketID = "01K2K1JQ5QXHCHM4Y3Q8ZR1A6B"
+	selfCalls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/self", func(w http.ResponseWriter, r *http.Request) {
+		selfCalls++
+		writeJSON(w, map[string]any{"principal_id": "p-2", "name": "scoped publisher", "role": "publisher", "bucket_id": bucketID})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"buckets": []map[string]any{{"id": bucketID, "name": "demo"}}})
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/versions"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, demoVersions())
+	})
+	mux.HandleFunc("GET "+compatPath("/buckets/demo/channels"), func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"channels": []map[string]any{}})
+	})
+	c := testClient(t, mux)
+
+	if _, err := listVersions(c, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("scoped credential must default its bucket without DFBG_MCP_BUCKET_ID: %v", err)
+	}
+	mustCall(t, listChannels, c, `{}`)
+	if selfCalls != 1 {
+		t.Fatalf("credential binding resolution made %d /self requests, want one", selfCalls)
 	}
 }
 

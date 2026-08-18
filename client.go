@@ -28,6 +28,9 @@ type client struct {
 	bucketOnce sync.Once
 	bucketName string
 	bucketErr  error
+	selfOnce   sync.Once
+	selfBucket string
+	selfErr    error
 }
 
 func newClientFromEnv() (*client, error) {
@@ -58,17 +61,26 @@ func newClientFromEnv() (*client, error) {
 	}, nil
 }
 
-// defaultBucket resolves the configured bucket id to the compat plane's
-// bucket name when a tool call omits its bucket argument.
+// defaultBucket resolves the default bucket id to the compat plane's bucket
+// name when a tool call omits its bucket argument: DFBG_MCP_BUCKET_ID when
+// set, otherwise the credential's own bucket binding from /self.
 func (c *client) defaultBucket(org, project string, bucket *string) error {
 	if *bucket != "" {
 		return nil
 	}
 	bucketID := os.Getenv("DFBG_MCP_BUCKET_ID")
+	source := "DFBG_MCP_BUCKET_ID"
+	if bucketID == "" {
+		var err error
+		if bucketID, err = c.selfBucketID(); err != nil {
+			return err
+		}
+		source = "the credential's bucket binding"
+	}
 	if bucketID == "" {
 		return nil
 	}
-	name, err := c.scopedBucketName(org, project, bucketID)
+	name, err := c.scopedBucketName(org, project, bucketID, source)
 	if err != nil {
 		return err
 	}
@@ -76,7 +88,7 @@ func (c *client) defaultBucket(org, project string, bucket *string) error {
 	return nil
 }
 
-func (c *client) scopedBucketName(org, project, bucketID string) (string, error) {
+func (c *client) scopedBucketName(org, project, bucketID, source string) (string, error) {
 	if bucketID == "" {
 		return "", nil
 	}
@@ -103,10 +115,27 @@ func (c *client) scopedBucketName(org, project, bucketID string) (string, error)
 			if ids == "" {
 				ids = "(none)"
 			}
-			c.bucketErr = fmt.Errorf("DFBG_MCP_BUCKET_ID %q does not match a visible bucket; visible bucket ids: %s", bucketID, ids)
+			c.bucketErr = fmt.Errorf("%s %q does not match a visible bucket; visible bucket ids: %s", source, bucketID, ids)
 		}
 	})
 	return c.bucketName, c.bucketErr
+}
+
+// selfBucketID reads the credential's own bucket binding from /self, once — a
+// bucket-scoped credential defaults its bucket without DFBG_MCP_BUCKET_ID.
+// Servers whose /self predates the field decode an empty id.
+func (c *client) selfBucketID() (string, error) {
+	c.selfOnce.Do(func() {
+		var self struct {
+			BucketID string `json:"bucket_id"`
+		}
+		if err := c.call("GET", "/api/v1/self", nil, &self); err != nil {
+			c.selfErr = err
+			return
+		}
+		c.selfBucket = self.BucketID
+	})
+	return c.selfBucket, c.selfErr
 }
 
 func (c *client) bearer() (string, error) {
