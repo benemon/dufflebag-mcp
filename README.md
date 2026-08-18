@@ -29,12 +29,15 @@ surface are documented in the
 | `DFBG_MCP_CA_FILE` | Optional PEM chain for a private CA. |
 | `DFBG_MCP_ORGANIZATION_ID` | Optional default organization for tenancy-scoped tools. |
 | `DFBG_MCP_PROJECT_ID` | Optional default project for tenancy-scoped tools. |
-| `DFBG_MCP_BUCKET_ID` | Optional default bucket id for bucket-scoped tools. |
+| `DFBG_MCP_BUCKET_ID` | Optional default bucket id for bucket-taking tools; bucket-scoped credentials default their own bucket without it. |
 | `DFBG_MCP_READ_ONLY` | When true, mutating tools are neither listed nor callable. |
 
 Bucket-scoped service principals use the existing client id and secret
-variables. Set `DFBG_MCP_BUCKET_ID` to the bucket's ULID (its id, not its
-name) so bucket-taking tools can omit their bucket argument.
+variables and need no `DFBG_MCP_BUCKET_ID`: the server reads the credential's
+own bucket binding from the registry, `whoami` reports it as `bucket_id`, and
+bucket-taking tools omit their bucket argument. The variable remains for
+wider credentials pinning a default bucket — set it to the bucket's ULID (its
+id, not its name); when set it always wins.
 
 ## Compatibility
 
@@ -47,6 +50,7 @@ feature; everything else works against any dufflebag release.
 | --- | --- | --- |
 | `find_artifact` via the search endpoint | ≥ 0.1.0 | Falls back to enumeration. |
 | Declared bucket scoping (`DFBG_MCP_BUCKET_ID`) | ≥ 0.1.0 | Credentials still confine server-side where enforced; the declared default and fail-fast check need the scoped listing. |
+| Credential-derived default bucket | ≥ 0.1.0 | `bucket_id` absent from `/self` decodes empty: set `DFBG_MCP_BUCKET_ID` or pass buckets explicitly. |
 
 ## Build
 
