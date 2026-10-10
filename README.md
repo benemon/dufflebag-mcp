@@ -37,8 +37,8 @@ Bucket-scoped service principals use the existing client id and secret
 variables and need no `DFBG_MCP_BUCKET_ID`: the server reads the credential's
 own bucket binding from the registry, `whoami` reports it as `bucket_id`, and
 bucket-taking tools omit their bucket argument. The variable remains for
-wider credentials pinning a default bucket — set it to the bucket's ULID (its
-id, not its name); when set it always wins.
+wider credentials pinning a default bucket. Set it to the bucket's ULID id
+rather than its name; when set it always wins.
 
 ## Compatibility
 
@@ -50,7 +50,7 @@ feature; everything else works against any dufflebag release.
 | Feature | Needs dufflebag | Below that |
 | --- | --- | --- |
 | `find_artifact` via the search endpoint | ≥ 0.1.0 | Falls back to enumeration. |
-| Plugin registry tools (`plugin_registry_status`, `list_plugins`, `plugin_versions`, `plugin_stanza`, `plugin_import_status`, `sync_plugin_updates`) | First release after 0.4.2 | The registry's API answers 404. |
+| Plugin registry tools (`plugin_registry_status`, `list_plugins`, `plugin_versions`, `plugin_stanza`, `plugin_import_status`, `sync_plugin_updates`) | Unreleased: dufflebag `main` after `v0.4.2-rc8` (no tagged release ships the registry yet) | The registry's API answers 404. |
 | Declared bucket scoping (`DFBG_MCP_BUCKET_ID`) | ≥ 0.1.0 | Credentials still confine server-side where enforced; the declared default and fail-fast check need the scoped listing. |
 | Credential-derived default bucket | ≥ 0.1.0 | `bucket_id` absent from `/self` decodes empty: set `DFBG_MCP_BUCKET_ID` or pass buckets explicitly. |
 
