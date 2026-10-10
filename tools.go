@@ -22,6 +22,7 @@ var writeTools = map[string]bool{
 	"create_organization": true,
 	"create_project":      true,
 	"promote_channel":     true,
+	"sync_plugin_updates": true,
 }
 
 // Tenancy arguments fall back to the optional environment defaults so a
@@ -187,6 +188,7 @@ func toolDefinitions() []map[string]any {
 			}, "external_identifier"),
 		},
 	}
+	defs = append(defs, pluginToolDefinitions()...)
 	if !readOnly() {
 		return defs
 	}
@@ -222,23 +224,29 @@ func callTool(c *client, params json.RawMessage) (map[string]any, error) {
 }
 
 var toolHandlers = map[string]func(*client, json.RawMessage) (map[string]any, error){
-	"whoami":                whoami,
-	"list_organizations":    listOrganizations,
-	"create_organization":   createOrganization,
-	"list_projects":         listProjects,
-	"create_project":        createProject,
-	"list_buckets":          listBuckets,
-	"list_versions":         listVersions,
-	"list_channels":         listChannels,
-	"resolve_channel":       resolveChannel,
-	"promote_channel":       promoteChannel,
-	"check_ancestry":        checkAncestry,
-	"version_diff":          versionDiff,
-	"vulnerability_summary": vulnerabilitySummary,
-	"list_vulnerabilities":  listVulnerabilities,
-	"bagdrop_status":        bagdropStatus,
-	"consume_snippet":       consumeSnippet,
-	"find_artifact":         findArtifact,
+	"whoami":                 whoami,
+	"list_organizations":     listOrganizations,
+	"create_organization":    createOrganization,
+	"list_projects":          listProjects,
+	"create_project":         createProject,
+	"list_buckets":           listBuckets,
+	"list_versions":          listVersions,
+	"list_channels":          listChannels,
+	"resolve_channel":        resolveChannel,
+	"promote_channel":        promoteChannel,
+	"check_ancestry":         checkAncestry,
+	"version_diff":           versionDiff,
+	"vulnerability_summary":  vulnerabilitySummary,
+	"list_vulnerabilities":   listVulnerabilities,
+	"bagdrop_status":         bagdropStatus,
+	"consume_snippet":        consumeSnippet,
+	"find_artifact":          findArtifact,
+	"plugin_registry_status": pluginRegistryStatus,
+	"list_plugins":           listPlugins,
+	"plugin_versions":        pluginVersions,
+	"plugin_stanza":          pluginStanza,
+	"plugin_import_status":   pluginImportStatus,
+	"sync_plugin_updates":    syncPluginUpdates,
 }
 
 func textResult(v any) (map[string]any, error) {
