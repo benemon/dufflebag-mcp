@@ -267,24 +267,22 @@ func pluginStanza(c *client, args json.RawMessage) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	version := in.Version
+	version, found, revoked := in.Version, false, false
 	for _, v := range versions {
 		if version == "" && !v.Revoked {
 			version = v.Version
 		}
-		if v.Version == version && v.Revoked {
-			return nil, fmt.Errorf("%s %s is revoked: Packer gets 404 for it until it is restored", in.Plugin, version)
+		if v.Version == version {
+			found, revoked = true, v.Revoked
 		}
 	}
-	if version == "" {
+	switch {
+	case version == "":
 		return nil, fmt.Errorf("%s has no version that is not revoked", in.Plugin)
-	}
-	found := false
-	for _, v := range versions {
-		found = found || v.Version == version
-	}
-	if !found {
+	case !found:
 		return nil, fmt.Errorf("%s has no version %s", in.Plugin, version)
+	case revoked:
+		return nil, fmt.Errorf("%s %s is revoked: Packer gets 404 for it until it is restored", in.Plugin, version)
 	}
 	name, err := c.organizationName(in.OrganizationID)
 	if err != nil {
