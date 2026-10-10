@@ -241,8 +241,8 @@ func TestReadOnlyPosture(t *testing.T) {
 	t.Setenv("DFBG_MCP_READ_ONLY", "true")
 
 	defs := toolDefinitions()
-	if len(defs) != 14 {
-		t.Fatalf("read-only listing has %d tools, want 14", len(defs))
+	if len(defs) != 19 {
+		t.Fatalf("read-only listing has %d tools, want 19", len(defs))
 	}
 	for _, def := range defs {
 		if writeTools[def["name"].(string)] {
@@ -258,8 +258,8 @@ func TestReadOnlyPosture(t *testing.T) {
 
 func TestToolDefinitionsComplete(t *testing.T) {
 	defs := toolDefinitions()
-	if len(defs) != 17 {
-		t.Fatalf("full listing has %d tools, want 17", len(defs))
+	if len(defs) != 23 {
+		t.Fatalf("full listing has %d tools, want 23", len(defs))
 	}
 	for _, def := range defs {
 		name := def["name"].(string)
